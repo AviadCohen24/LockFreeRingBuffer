@@ -1,83 +1,82 @@
 #include "buffer.h"
 
-bool expected_access = true;
-bool desired_access = false;
+/* Exponential backoff: spin a few times cheaply, then yield the thread.
+   Keeps the fast path fast and stops burning the bus on full/empty waits. */
+static void backoff(int* count) {
+    if (*count < 16) {
+        for (int i = 0; i < *count; i++)
+            CPU_PAUSE();
+    } else {
+        THREAD_YIELD();
+    }
+    if (*count < 32) *count *= 2;
+}
 
 enum BufferError buffer_init(int size, struct Buffer* buffer) {
-    // Implementation for buffer initialization
-    if (size <= 0) {
-        return BUFFER_INVALID_SIZE; // Invalid size
+    if (size <= 0)
+        return BUFFER_INVALID_SIZE;
+
+    buffer->data = malloc(size * sizeof(int));
+    if (!buffer->data)
+        return BUFFER_FAILED_MALLOC;
+
+    buffer->seq = malloc(size * sizeof(SeqSlot));
+    if (!buffer->seq) {
+        free(buffer->data);
+        return BUFFER_FAILED_MALLOC;
     }
-    buffer->data = malloc(size * sizeof(int)); // Allocate memory for the buffer
-    if (buffer->data == NULL) {
-        return BUFFER_FAILED_MALLOC; // Failed to allocate memory
-    }
+
+    for (int i = 0; i < size; i++)
+        atomic_init(&buffer->seq[i].val, i);
+
     buffer->size = size;
-    buffer->head = 0;
-    buffer->tail = 0;
-    atomic_store(&buffer->can_access, true); // Initialize ownership to true
+    atomic_init(&buffer->head, 0);
+    atomic_init(&buffer->tail, 0);
     return BUFFER_SUCCESS;
 }
 
 void buffer_destroy(struct Buffer* buffer) {
-    // Implementation for buffer destruction
-    free(buffer->data); // Free the memory allocated for the buffer
-    free(buffer); // Free the buffer structure itself
-    printf("Buffer destroyed\n");
+    free(buffer->data);
+    free(buffer->seq);
 }
 
 enum BufferError buffer_push(struct Buffer* buffer, int value) {
-    // Implementation for non-blocking push
-    if(buffer->tail == (buffer->head + 1) % buffer->size) {
-        return BUFFER_FULL; // Buffer is full, cannot push
-    }
-    if(atomic_compare_exchange_strong_explicit(&buffer->can_access, &expected_access, &desired_access, memory_order_release, memory_order_relaxed) == false) {
-        return BUFFER_TAKEN; // Buffer is taken, cannot push
-    }
-    buffer->data[buffer->head] = value; // Add value to the buffer
-    buffer->head = (buffer->head + 1) % buffer->size; // Move head to the next position
-    atomic_store(&buffer->can_access, true); // Set ownership back to true after accessing the buffer
-    return BUFFER_SUCCESS; // Push successful
+    int tail = atomic_load_explicit(&buffer->tail, memory_order_relaxed);
+    int next_tail = (tail + 1) % buffer->size;
+    if (next_tail == atomic_load_explicit(&buffer->head, memory_order_acquire))
+        return BUFFER_FULL;
+    buffer->data[tail] = value;
+    atomic_store_explicit(&buffer->tail, next_tail, memory_order_release);
+    return BUFFER_SUCCESS;
 }
 
 enum BufferError buffer_pop(struct Buffer* buffer, int* value) {
-    // Implementation for non-blocking pop
-    if(buffer->head == buffer->tail) {
-        return BUFFER_EMPTY; // Buffer is empty, cannot pop
-    }
-    if(atomic_compare_exchange_strong_explicit(&buffer->can_access, &expected_access, &desired_access, memory_order_release, memory_order_relaxed) == false) {
-        return BUFFER_TAKEN; // Buffer is taken, cannot pop
-    }
-    *value = buffer->data[buffer->tail]; // Retrieve value from the buffer
-    buffer->tail = (buffer->tail + 1) % buffer->size; // Move tail to the next position
-    atomic_store(&buffer->can_access, true); // Set ownership back to true after accessing
-    return BUFFER_SUCCESS; // Pop successful
+    int head = atomic_load_explicit(&buffer->head, memory_order_relaxed);
+    if (head == atomic_load_explicit(&buffer->tail, memory_order_acquire))
+        return BUFFER_EMPTY;
+    *value = buffer->data[head];
+    atomic_store_explicit(&buffer->head, (head + 1) % buffer->size, memory_order_release);
+    return BUFFER_SUCCESS;
 }
 
 enum BufferError buffer_push_blocking(struct Buffer* buffer, int value) {
-    // Implementation for blocking push
-    while(buffer->tail == (buffer->head + 1) % buffer->size) { // Wait until there is space in the buffer
-        Yield(); // Yield to allow other threads to run
-    }
-    while(atomic_compare_exchange_strong_explicit(&buffer->can_access, &expected_access, &desired_access, memory_order_release, memory_order_relaxed) == false) { // Wait until the buffer is available for access
-        Yield(); // Yield to allow other threads to run
-    }
-    buffer->data[buffer->head] = value; // Add value to the buffer
-    buffer->head = (buffer->head + 1) % buffer->size; // Move head to the next position
-    atomic_store(&buffer->can_access, true); // Set ownership back to true after accessing the buffer
-    return BUFFER_SUCCESS; // Push successful
+    int pos  = atomic_fetch_add_explicit(&buffer->tail, 1, memory_order_relaxed);
+    int slot = pos % buffer->size;
+    int spin = 1;
+    while (atomic_load_explicit(&buffer->seq[slot].val, memory_order_acquire) != pos)
+        backoff(&spin);
+    buffer->data[slot] = value;
+    atomic_store_explicit(&buffer->seq[slot].val, pos + 1, memory_order_release);
+    return BUFFER_SUCCESS;
 }
 
 enum BufferError buffer_pop_blocking(struct Buffer* buffer, int* value) {
-    // Implementation for non-blocking pop
-    while(buffer->head == buffer->tail) { // Wait until the buffer is not empty
-        Yield(); // Yield to allow other threads to run
-    }
-    while(atomic_compare_exchange_strong_explicit(&buffer->can_access, &expected_access, &desired_access, memory_order_release, memory_order_relaxed) == false) { // Wait until the buffer is available for access
-        Yield(); // Yield to allow other threads to run
-    }
-    *value = buffer->data[buffer->tail]; // Retrieve value from the buffer
-    buffer->tail = (buffer->tail + 1) % buffer->size; // Move tail to the next position
-    atomic_store(&buffer->can_access, true); // Set ownership back to true after accessing
-    return BUFFER_SUCCESS; // Pop successful
+    int pos  = atomic_fetch_add_explicit(&buffer->head, 1, memory_order_relaxed);
+    int slot = pos % buffer->size;
+    int spin = 1;
+    while (atomic_load_explicit(&buffer->seq[slot].val, memory_order_acquire) != pos + 1)
+        backoff(&spin);
+    *value = buffer->data[slot];
+    atomic_store_explicit(&buffer->seq[slot].val, pos + buffer->size, memory_order_release);
+    return BUFFER_SUCCESS;
 }
