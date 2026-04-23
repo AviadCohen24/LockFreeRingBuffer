@@ -1,1 +1,24 @@
+# Build output
 /build/
+
+# Compiled objects and binaries
+*.o
+*.a
+*.so
+*.exe
+*.out
+*.d
+
+# CMake generated files (if not using out-of-source build)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# IDE
+.vscode/
+.idea/
+*.user
+
+# vcpkg installed packages (not our port definition)
+vcpkg_installed/

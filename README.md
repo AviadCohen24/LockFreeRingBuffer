@@ -36,23 +36,58 @@ The advantage grows with thread count — exactly where you need it.
 
 ---
 
-## Quick Start
+## Installation
 
-### Header-only (recommended)
+### Option 1 — CMake FetchContent (no setup required)
 
-```c
-// In exactly ONE .c file:
-#define RING_BUFFER_IMPLEMENTATION
-#include "ring_buffer.h"
+Add this to your `CMakeLists.txt` and CMake will download and wire up the library automatically:
 
-// In all other files:
-#include "ring_buffer.h"
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+    ring_buffer
+    GIT_REPOSITORY https://github.com/AviadCohen24/LockFreeRingBuffer.git
+    GIT_TAG        v1.0.0
+)
+FetchContent_MakeAvailable(ring_buffer)
+
+target_link_libraries(your_target PRIVATE ring_buffer)
 ```
+
+### Option 2 — vcpkg
+
+```bash
+vcpkg install lock-free-ring-buffer
+```
+
+Then in your `CMakeLists.txt`:
+
+```cmake
+find_package(ring-buffer CONFIG REQUIRED)
+target_link_libraries(your_target PRIVATE ring-buffer::ring-buffer)
+```
+
+### Option 3 — Copy the header
+
+Since `ring_buffer.h` is a single header, you can also just copy it into your project:
+
+```bash
+curl -O https://raw.githubusercontent.com/AviadCohen24/LockFreeRingBuffer/main/ring_buffer.h
+```
+
+---
+
+## Usage
 
 ```c
 #include <stdio.h>
+
+// In exactly ONE .c file define this before the include:
 #define RING_BUFFER_IMPLEMENTATION
 #include "ring_buffer.h"
+
+// In all other files just include normally:
+// #include "ring_buffer.h"
 
 int main(void) {
     RingBuffer rb;
@@ -66,16 +101,6 @@ int main(void) {
 
     rb_destroy(&rb);
 }
-```
-
-### CMake
-
-```cmake
-add_library(ring_buffer INTERFACE)
-target_include_directories(ring_buffer INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(ring_buffer INTERFACE Threads::Threads)
-
-target_link_libraries(your_target PRIVATE ring_buffer)
 ```
 
 ---
