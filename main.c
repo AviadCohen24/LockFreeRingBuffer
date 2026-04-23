@@ -1,31 +1,32 @@
-#include "buffer.h"
+#include <stdio.h>
+
+#define RING_BUFFER_IMPLEMENTATION
+#include "ring_buffer.h"
 
 int main() {
-    struct Buffer* buffer = malloc(sizeof(struct Buffer));
-    if (buffer == NULL) {
+    RingBuffer* rb = malloc(sizeof(RingBuffer));
+    if (!rb) {
         printf("Failed to allocate buffer\n");
-        return 1; // Exit with error code
+        return 1;
     }
-    if (buffer_init(5, buffer) != BUFFER_SUCCESS) {
-        printf("Failed to initialize buffer: Invalid size\n");
-        free(buffer);
-        return 1; // Exit with error code
+    if (rb_init(5, rb) != RB_OK) {
+        printf("Failed to initialize buffer\n");
+        free(rb);
+        return 1;
     }
 
-    // Example usage of the buffer
-    if (buffer_push(buffer, 10) == BUFFER_SUCCESS) {
+    if (rb_push(rb, 10) == RB_OK)
         printf("Pushed 10 to buffer\n");
-    } else {
+    else
         printf("Failed to push to buffer\n");
-    }
 
     int value;
-    if (buffer_pop(buffer, &value) == BUFFER_SUCCESS) {
+    if (rb_pop(rb, &value) == RB_OK)
         printf("Popped %d from buffer\n", value);
-    } else {
+    else
         printf("Failed to pop from buffer\n");
-    }
 
-    buffer_destroy(buffer); // Clean up the buffer
-    return 0; // Exit with success code
+    rb_destroy(rb);
+    free(rb);
+    return 0;
 }

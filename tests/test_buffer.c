@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include "../buffer.h"
+
+#define RING_BUFFER_IMPLEMENTATION
+#include "../ring_buffer.h"
 #include "../buffer_mutex.h"
 
 #include <windows.h>
@@ -24,23 +26,23 @@ static int g_tests_passed = 0;
 /* ------------------------------------------------------------------ */
 
 static void test_init_valid(void) {
-    struct Buffer b;
-    ASSERT(buffer_init(5, &b) == BUFFER_SUCCESS, "init(5) returns BUFFER_SUCCESS");
+    RingBuffer b;
+    ASSERT(rb_init(5, &b) == RB_OK, "init(5) returns RB_OK");
 }
 
 static void test_init_zero(void) {
-    struct Buffer b;
-    ASSERT(buffer_init(0, &b) == BUFFER_INVALID_SIZE, "init(0) returns BUFFER_INVALID_SIZE");
+    RingBuffer b;
+    ASSERT(rb_init(0, &b) == RB_INVALID_SIZE, "init(0) returns RB_INVALID_SIZE");
 }
 
 static void test_init_negative(void) {
-    struct Buffer b;
-    ASSERT(buffer_init(-4, &b) == BUFFER_INVALID_SIZE, "init(-4) returns BUFFER_INVALID_SIZE");
+    RingBuffer b;
+    ASSERT(rb_init(-4, &b) == RB_INVALID_SIZE, "init(-4) returns RB_INVALID_SIZE");
 }
 
 static void test_init_sets_fields(void) {
-    struct Buffer b;
-    buffer_init(8, &b);
+    RingBuffer b;
+    rb_init(8, &b);
     ASSERT(b.size == 8, "init sets size field");
     ASSERT(b.head == 0, "init sets head to 0");
     ASSERT(b.tail == 0, "init sets tail to 0");
@@ -51,25 +53,25 @@ static void test_init_sets_fields(void) {
 /* ------------------------------------------------------------------ */
 
 static void test_push_to_empty(void) {
-    struct Buffer b;
-    buffer_init(5, &b);
-    ASSERT(buffer_push(&b, 42) == BUFFER_SUCCESS, "push to empty buffer succeeds");
+    RingBuffer b;
+    rb_init(5, &b);
+    ASSERT(rb_push(&b, 42) == RB_OK, "push to empty buffer succeeds");
 }
 
 static void test_pop_gives_pushed_value(void) {
-    struct Buffer b;
-    buffer_init(5, &b);
-    buffer_push(&b, 99);
+    RingBuffer b;
+    rb_init(5, &b);
+    rb_push(&b, 99);
     int val = 0;
-    ASSERT(buffer_pop(&b, &val) == BUFFER_SUCCESS, "pop from non-empty succeeds");
+    ASSERT(rb_pop(&b, &val) == RB_OK, "pop from non-empty succeeds");
     ASSERT(val == 99, "popped value equals pushed value");
 }
 
 static void test_pop_empty_returns_error(void) {
-    struct Buffer b;
-    buffer_init(5, &b);
+    RingBuffer b;
+    rb_init(5, &b);
     int val;
-    ASSERT(buffer_pop(&b, &val) == BUFFER_EMPTY, "pop from empty buffer returns BUFFER_EMPTY");
+    ASSERT(rb_pop(&b, &val) == RB_EMPTY, "pop from empty buffer returns RB_EMPTY");
 }
 
 /* ------------------------------------------------------------------ */
@@ -78,21 +80,21 @@ static void test_pop_empty_returns_error(void) {
 
 static void test_push_full_returns_error(void) {
     /* size=3 ring buffer holds at most 2 items (one slot wasted) */
-    struct Buffer b;
-    buffer_init(3, &b);
-    ASSERT(buffer_push(&b, 1) == BUFFER_SUCCESS, "push 1st item succeeds");
-    ASSERT(buffer_push(&b, 2) == BUFFER_SUCCESS, "push 2nd item succeeds");
-    ASSERT(buffer_push(&b, 3) == BUFFER_FULL,    "push to full buffer returns BUFFER_FULL");
+    RingBuffer b;
+    rb_init(3, &b);
+    ASSERT(rb_push(&b, 1) == RB_OK, "push 1st item succeeds");
+    ASSERT(rb_push(&b, 2) == RB_OK, "push 2nd item succeeds");
+    ASSERT(rb_push(&b, 3) == RB_FULL,    "push to full buffer returns RB_FULL");
 }
 
 static void test_pop_after_full_succeeds(void) {
-    struct Buffer b;
-    buffer_init(3, &b);
-    buffer_push(&b, 10);
-    buffer_push(&b, 20);
+    RingBuffer b;
+    rb_init(3, &b);
+    rb_push(&b, 10);
+    rb_push(&b, 20);
     int val;
-    buffer_pop(&b, &val);
-    ASSERT(buffer_push(&b, 30) == BUFFER_SUCCESS, "push after partial drain succeeds");
+    rb_pop(&b, &val);
+    ASSERT(rb_push(&b, 30) == RB_OK, "push after partial drain succeeds");
 }
 
 /* ------------------------------------------------------------------ */
@@ -100,15 +102,15 @@ static void test_pop_after_full_succeeds(void) {
 /* ------------------------------------------------------------------ */
 
 static void test_fifo_order(void) {
-    struct Buffer b;
-    buffer_init(6, &b);
+    RingBuffer b;
+    rb_init(6, &b);
     for (int i = 0; i < 5; i++)
-        buffer_push(&b, i * 10);
+        rb_push(&b, i * 10);
 
     int ok = 1;
     for (int i = 0; i < 5; i++) {
         int val;
-        buffer_pop(&b, &val);
+        rb_pop(&b, &val);
         if (val != i * 10) ok = 0;
     }
     ASSERT(ok, "FIFO order preserved over 5 pushes/pops");
@@ -120,19 +122,19 @@ static void test_fifo_order(void) {
 
 static void test_wraparound(void) {
     /* size=4 holds 3 items; advance head/tail past the array boundary */
-    struct Buffer b;
-    buffer_init(4, &b);
-    buffer_push(&b, 1);
-    buffer_push(&b, 2);
+    RingBuffer b;
+    rb_init(4, &b);
+    rb_push(&b, 1);
+    rb_push(&b, 2);
     int dummy;
-    buffer_pop(&b, &dummy);
-    buffer_push(&b, 3);
-    buffer_push(&b, 4);
+    rb_pop(&b, &dummy);
+    rb_push(&b, 3);
+    rb_push(&b, 4);
 
     int v[3];
-    buffer_pop(&b, &v[0]);
-    buffer_pop(&b, &v[1]);
-    buffer_pop(&b, &v[2]);
+    rb_pop(&b, &v[0]);
+    rb_pop(&b, &v[1]);
+    rb_pop(&b, &v[2]);
     ASSERT(v[0] == 2 && v[1] == 3 && v[2] == 4, "wrap-around preserves FIFO order");
 }
 
@@ -141,24 +143,24 @@ static void test_wraparound(void) {
 /* ------------------------------------------------------------------ */
 
 static void test_empty_after_drain(void) {
-    struct Buffer b;
-    buffer_init(4, &b);
-    buffer_push(&b, 7);
-    buffer_push(&b, 8);
+    RingBuffer b;
+    rb_init(4, &b);
+    rb_push(&b, 7);
+    rb_push(&b, 8);
     int val;
-    buffer_pop(&b, &val);
-    buffer_pop(&b, &val);
-    ASSERT(buffer_pop(&b, &val) == BUFFER_EMPTY, "buffer reports empty after full drain");
+    rb_pop(&b, &val);
+    rb_pop(&b, &val);
+    ASSERT(rb_pop(&b, &val) == RB_EMPTY, "buffer reports empty after full drain");
 }
 
 static void test_refill_after_drain(void) {
-    struct Buffer b;
-    buffer_init(4, &b);
-    buffer_push(&b, 1);
+    RingBuffer b;
+    rb_init(4, &b);
+    rb_push(&b, 1);
     int val;
-    buffer_pop(&b, &val);
-    ASSERT(buffer_push(&b, 2) == BUFFER_SUCCESS, "push succeeds after drain");
-    buffer_pop(&b, &val);
+    rb_pop(&b, &val);
+    ASSERT(rb_push(&b, 2) == RB_OK, "push succeeds after drain");
+    rb_pop(&b, &val);
     ASSERT(val == 2, "correct value after drain-refill cycle");
 }
 
@@ -169,7 +171,7 @@ static void test_refill_after_drain(void) {
 #define TRANSFER_COUNT 2000
 
 typedef struct {
-    struct Buffer* buf;
+    RingBuffer* buf;
     int count;
     int result; /* consumer writes its sum here */
 } ThreadArgs;
@@ -177,7 +179,7 @@ typedef struct {
 static DWORD WINAPI producer_fn(LPVOID arg) {
     ThreadArgs* a = (ThreadArgs*)arg;
     for (int i = 0; i < a->count; i++)
-        buffer_push_blocking(a->buf, i);
+        rb_push_blocking(a->buf, i);
     return 0;
 }
 
@@ -186,7 +188,7 @@ static DWORD WINAPI consumer_fn(LPVOID arg) {
     int sum = 0;
     for (int i = 0; i < a->count; i++) {
         int val;
-        buffer_pop_blocking(a->buf, &val);
+        rb_pop_blocking(a->buf, &val);
         sum += val;
     }
     a->result = sum;
@@ -194,8 +196,8 @@ static DWORD WINAPI consumer_fn(LPVOID arg) {
 }
 
 static void test_concurrent_spsc(void) {
-    struct Buffer b;
-    buffer_init(32, &b);
+    RingBuffer b;
+    rb_init(32, &b);
     ThreadArgs args = { .buf = &b, .count = TRANSFER_COUNT, .result = 0 };
 
     HANDLE prod = CreateThread(NULL, 0, producer_fn, &args, 0, NULL);
@@ -220,14 +222,14 @@ static void test_concurrent_spsc(void) {
 #define MPMC_ITEMS_PER_PRODUCER 500  /* must be divisible by any nc used below */
 
 typedef struct {
-    struct Buffer* buf;
+    RingBuffer* buf;
     int            start_val;
     int            count;
     long           sum_out;
 } MpProducerArgs;
 
 typedef struct {
-    struct Buffer* buf;
+    RingBuffer* buf;
     int            count;
     long           sum_out;
 } McConsumerArgs;
@@ -236,7 +238,7 @@ static DWORD WINAPI mpmc_producer_fn(LPVOID arg) {
     MpProducerArgs* a = (MpProducerArgs*)arg;
     long sum = 0;
     for (int i = 0; i < a->count; i++) {
-        buffer_push_blocking(a->buf, a->start_val + i);
+        rb_push_blocking(a->buf, a->start_val + i);
         sum += a->start_val + i;
     }
     a->sum_out = sum;
@@ -248,7 +250,7 @@ static DWORD WINAPI mpmc_consumer_fn(LPVOID arg) {
     long sum = 0;
     for (int i = 0; i < a->count; i++) {
         int val;
-        buffer_pop_blocking(a->buf, &val);
+        rb_pop_blocking(a->buf, &val);
         sum += val;
     }
     a->sum_out = sum;
@@ -261,8 +263,8 @@ static void run_mpmc_correctness(int np, int nc, int buf_size, const char* label
     int total              = np * items_per_producer;
     int items_per_consumer = total / nc;
 
-    struct Buffer b;
-    buffer_init(buf_size, &b);
+    RingBuffer b;
+    rb_init(buf_size, &b);
 
     MpProducerArgs p_args[8];
     McConsumerArgs c_args[8];
@@ -308,20 +310,20 @@ static void test_mpmc_8p8c(void) { run_mpmc_correctness(8, 8, 256, "8P8C: pushed
 #define PERF_ITEMS_PER_PRODUCER 8000  /* divisible by 1/2/4/8 */
 
 typedef struct {
-    struct Buffer* buf;
+    RingBuffer* buf;
     int            start_val;
     int            count;
 } PerfProducerArgs;
 
 typedef struct {
-    struct Buffer* buf;
+    RingBuffer* buf;
     int            count;
 } PerfConsumerArgs;
 
 static DWORD WINAPI perf_producer_fn(LPVOID arg) {
     PerfProducerArgs* a = (PerfProducerArgs*)arg;
     for (int i = 0; i < a->count; i++)
-        buffer_push_blocking(a->buf, a->start_val + i);
+        rb_push_blocking(a->buf, a->start_val + i);
     return 0;
 }
 
@@ -329,7 +331,7 @@ static DWORD WINAPI perf_consumer_fn(LPVOID arg) {
     PerfConsumerArgs* a = (PerfConsumerArgs*)arg;
     int val;
     for (int i = 0; i < a->count; i++)
-        buffer_pop_blocking(a->buf, &val);
+        rb_pop_blocking(a->buf, &val);
     return 0;
 }
 
@@ -338,8 +340,8 @@ static double run_perf_benchmark(int np, int nc, int buf_size) {
     int total              = np * PERF_ITEMS_PER_PRODUCER;
     int items_per_consumer = total / nc;
 
-    struct Buffer b;
-    buffer_init(buf_size, &b);
+    RingBuffer b;
+    rb_init(buf_size, &b);
 
     PerfProducerArgs p_args[8];
     PerfConsumerArgs c_args[8];
@@ -552,8 +554,8 @@ static double bench_lockfree(int np, int nc, int buf_size) {
     int total              = np * CMP_ITEMS_PER_PRODUCER;
     int items_per_consumer = total / nc;
 
-    struct Buffer b;
-    buffer_init(buf_size, &b);
+    RingBuffer b;
+    rb_init(buf_size, &b);
 
     PerfProducerArgs p_args[8];
     PerfConsumerArgs c_args[8];
