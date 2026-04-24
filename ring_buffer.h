@@ -1,13 +1,8 @@
 /*  ring_buffer.h  —  lock-free MPMC ring buffer
  *  -----------------------------------------------
- *  Single-header library. Usage:
+ *  Header-only library. Include wherever needed:
  *
- *    // In exactly ONE .c file:
- *    #define RING_BUFFER_IMPLEMENTATION
- *    #include "ring_buffer.h"
- *
- *    // In every other file that needs the API (declarations only):
- *    #include "ring_buffer.h"
+ *    #include <ring_buffer.h>
  *
  *  License: MIT
  */
@@ -76,35 +71,10 @@ typedef enum {
 } RbError;
 
 /* ------------------------------------------------------------------ */
-/* API declarations                                                    */
+/* Implementation (static inline — safe to include in multiple TUs)   */
 /* ------------------------------------------------------------------ */
 
-/* Initialize a ring buffer with the given capacity.
-   The buffer can hold (size - 1) items. Caller owns the RingBuffer. */
-RbError rb_init(int size, RingBuffer* rb);
-
-/* Free memory allocated by rb_init. */
-void rb_destroy(RingBuffer* rb);
-
-/* Non-blocking push. Returns RB_FULL immediately if no space. */
-RbError rb_push(RingBuffer* rb, int value);
-
-/* Non-blocking pop. Returns RB_EMPTY immediately if no data. */
-RbError rb_pop(RingBuffer* rb, int* value);
-
-/* Blocking push. Waits until space is available. MPMC-safe. */
-RbError rb_push_blocking(RingBuffer* rb, int value);
-
-/* Blocking pop. Waits until data is available. MPMC-safe. */
-RbError rb_pop_blocking(RingBuffer* rb, int* value);
-
-/* ------------------------------------------------------------------ */
-/* Implementation                                                      */
-/* ------------------------------------------------------------------ */
-
-#ifdef RING_BUFFER_IMPLEMENTATION
-
-static void rb__backoff(int* count) {
+static inline void rb__backoff(int* count) {
     if (*count < 16) {
         for (int i = 0; i < *count; i++)
             RB_CPU_PAUSE();
@@ -114,7 +84,7 @@ static void rb__backoff(int* count) {
     if (*count < 32) *count *= 2;
 }
 
-RbError rb_init(int size, RingBuffer* rb) {
+static inline RbError rb_init(int size, RingBuffer* rb) {
     if (size <= 0)
         return RB_INVALID_SIZE;
 
@@ -137,12 +107,13 @@ RbError rb_init(int size, RingBuffer* rb) {
     return RB_OK;
 }
 
-void rb_destroy(RingBuffer* rb) {
+static inline void rb_destroy(RingBuffer* rb) {
     free(rb->data);
     free(rb->seq);
 }
 
-RbError rb_push(RingBuffer* rb, int value) {
+/* Non-blocking push. Returns RB_FULL immediately if no space. */
+static inline RbError rb_push(RingBuffer* rb, int value) {
     int tail      = atomic_load_explicit(&rb->tail, memory_order_relaxed);
     int next_tail = (tail + 1) % rb->size;
     if (next_tail == atomic_load_explicit(&rb->head, memory_order_acquire))
@@ -152,7 +123,8 @@ RbError rb_push(RingBuffer* rb, int value) {
     return RB_OK;
 }
 
-RbError rb_pop(RingBuffer* rb, int* value) {
+/* Non-blocking pop. Returns RB_EMPTY immediately if no data. */
+static inline RbError rb_pop(RingBuffer* rb, int* value) {
     int head = atomic_load_explicit(&rb->head, memory_order_relaxed);
     if (head == atomic_load_explicit(&rb->tail, memory_order_acquire))
         return RB_EMPTY;
@@ -161,7 +133,8 @@ RbError rb_pop(RingBuffer* rb, int* value) {
     return RB_OK;
 }
 
-RbError rb_push_blocking(RingBuffer* rb, int value) {
+/* Blocking push. Waits until space is available. MPMC-safe. */
+static inline RbError rb_push_blocking(RingBuffer* rb, int value) {
     int pos  = atomic_fetch_add_explicit(&rb->tail, 1, memory_order_relaxed);
     int slot = pos % rb->size;
     int spin = 1;
@@ -172,7 +145,8 @@ RbError rb_push_blocking(RingBuffer* rb, int value) {
     return RB_OK;
 }
 
-RbError rb_pop_blocking(RingBuffer* rb, int* value) {
+/* Blocking pop. Waits until data is available. MPMC-safe. */
+static inline RbError rb_pop_blocking(RingBuffer* rb, int* value) {
     int pos  = atomic_fetch_add_explicit(&rb->head, 1, memory_order_relaxed);
     int slot = pos % rb->size;
     int spin = 1;
@@ -182,5 +156,3 @@ RbError rb_pop_blocking(RingBuffer* rb, int* value) {
     atomic_store_explicit(&rb->seq[slot].val, pos + rb->size, memory_order_release);
     return RB_OK;
 }
-
-#endif /* RING_BUFFER_IMPLEMENTATION */

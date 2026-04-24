@@ -1,5 +1,5 @@
-# lock-free-ring-buffer is a header-only library — no compilation needed.
 set(VCPKG_BUILD_TYPE release)
+set(VCPKG_POLICY_HEADER_ONLY enabled)
 
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
@@ -9,9 +9,10 @@ vcpkg_from_github(
     HEAD_REF main
 )
 
-# Install the single header
 file(INSTALL "${SOURCE_PATH}/ring_buffer.h"
-     DESTINATION "${CURRENT_PACKAGES_DIR}/include")
+     DESTINATION "${CURRENT_PACKAGES_DIR}/include/${PORT}")
 
-# Install license
 vcpkg_install_copyright(FILE_LIST "${SOURCE_PATH}/LICENSE")
+
+file(INSTALL "${CMAKE_CURRENT_LIST_DIR}/usage"
+     DESTINATION "${CURRENT_PACKAGES_DIR}/share/${PORT}")
